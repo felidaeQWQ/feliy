@@ -1,0 +1,15 @@
+[[redirects]]
+  from = "/app/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+[[redirects]]
+  from = "/healthz"
+  to = "/.netlify/functions/api"
+  status = 200
+  force = true
+[[redirects]]
+  from = "/uploads/*"
+  to = "/.netlify/functions/api"
+  status = 200
+  force = true
