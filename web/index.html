@@ -1894,6 +1894,23 @@
         <span class="plus-icon">📔</span>
         <span class="plus-label">他的日记</span>
       </button>
+      <button class="plus-item" data-action="memory">
+        <span class="plus-icon">🧠</span>
+        <span class="plus-label">记忆库</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Memory Page -->
+  <div class="diary-page hidden" id="memoryPage">
+    <div class="diary-topbar">
+      <button class="diary-back" id="memoryBack" aria-label="返回">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <h2>🧠 Feliy 的记忆库</h2>
+    </div>
+    <div class="diary-scroll" id="memoryScroll">
+      <p class="diary-empty">还没什么记忆。<br>多和 Feliy 聊聊天，他会记住重要的事 ✨</p>
     </div>
   </div>
 
@@ -2264,6 +2281,7 @@ const voiceBtn = $("#voiceBtn"), emojiBtn = $("#emojiBtn"), plusBtn = $("#plusBt
 const emojiPanel = $("#emojiPanel"), plusPanel = $("#plusPanel");
 const emojiContent = $("#emojiContent"), kaomojiContent = $("#kaomojiContent"), stickerContent = $("#stickerContent");
 const diaryPage = $("#diaryPage"), diaryScroll = $("#diaryScroll"), diaryBack = $("#diaryBack");
+const memoryPage = $("#memoryPage"), memoryScroll = $("#memoryScroll"), memoryBack = $("#memoryBack");
 const cameraInput = $("#cameraInput"), stickerInput = $("#stickerInput"), clipInput = $("#clipInput");
 const localPreview = new Map();
 const avatarInput = $("#avatarInput"), wallEl = $("#wall");
@@ -5142,6 +5160,7 @@ document.addEventListener("click", (e) => {
   if (action === "photo"){ clipInput && clipInput.click(); closeAllPanels(); }
   if (action === "camera"){ cameraInput && cameraInput.click(); closeAllPanels(); }
   if (action === "diary"){ openDiary(); closeAllPanels(); }
+  if (action === "memory"){ openMemory(); closeAllPanels(); }
 });
 
 if (emojiBtn) emojiBtn.addEventListener("click", () => {
@@ -5224,6 +5243,39 @@ function closeDiary(){
   diaryPage.classList.add("hidden");
 }
 if (diaryBack) diaryBack.addEventListener("click", closeDiary);
+
+function openMemory(){
+  if (!memoryPage) return;
+  memoryPage.classList.remove("hidden");
+  renderMemory();
+}
+function closeMemory(){
+  if (!memoryPage) return;
+  memoryPage.classList.add("hidden");
+}
+if (memoryBack) memoryBack.addEventListener("click", closeMemory);
+
+async function renderMemory(){
+  if (!memoryScroll) return;
+  try {
+    const resp = await fetch(`${API_BASE}/app/memories`, { headers: authHeaders() });
+    if (!resp.ok) throw new Error("failed");
+    const data = await resp.json();
+    const entries = data.memories || [];
+    if (!entries.length){
+      memoryScroll.innerHTML = '<p class="diary-empty">还没什么记忆。<br>多和 Feliy 聊聊天，他会自动记住重要的事 ✨</p>';
+      return;
+    }
+    memoryScroll.innerHTML = entries.map(m => {
+      const dateObj = new Date(m.created_at);
+      const dateStr = dateObj.toLocaleDateString("zh-CN", { month:"long", day:"numeric", hour:"2-digit", minute:"2-digit" });
+      const catLabel = {general:"📌", preference:"💕", event:"📅", promise:"🤝", fact:"💡"}[m.category] || "📌";
+      return `<div class="diary-card"><div class="diary-date">${catLabel} ${dateStr}</div><div class="diary-body">${escapeHtml(m.content)}</div></div>`;
+    }).join("");
+  } catch(e){
+    if (memoryScroll) memoryScroll.innerHTML = '<p class="diary-empty">加载记忆失败。再聊一会儿就会有了 ✨</p>';
+  }
+}
 
 async function renderDiary(){
   if (!diaryScroll) return;

@@ -171,6 +171,14 @@ def init_db() -> None:
                 created_at TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS memories (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                content   TEXT NOT NULL,
+                category  TEXT DEFAULT 'general',
+                created_at TEXT NOT NULL
+            )
+        """)
         conn.commit()
 
 
@@ -200,6 +208,75 @@ def get_history(since: int = 0, limit: int = 100) -> list[dict]:
         }
         for r in rows
     ]
+
+
+# ============================================================================
+# Memory System
+# ============================================================================
+
+def get_memories(limit: int = 20) -> list[dict]:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, content, category, created_at FROM memories ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [{"id": r["id"], "content": r["content"], "category": r["category"], "created_at": r["created_at"]} for r in rows]
+
+
+def save_memory(content: str, category: str = "general"):
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO memories (content, category, created_at) VALUES (?, ?, ?)",
+            (content.strip(), category, now_iso()),
+        )
+        conn.commit()
+
+
+def build_memory_context() -> str:
+    """Build a concise memory context for the system prompt."""
+    memories = get_memories(15)
+    if not memories:
+        return ""
+    lines = []
+    for m in memories:
+        lines.append(f"- {m['content']}")
+    return "\n".join(lines)
+
+
+async def extract_memories_from_chat():
+    """Use AI to extract key memories from recent conversations."""
+    messages = get_history(0, 50)
+    if len(messages) < 10:
+        return  # Not enough conversation yet
+
+    # Build a digest of recent chats
+    digest = ""
+    for m in messages[-30:]:
+        who = "Kunuon" if m["direction"] == "in" else "Feliy"
+        digest += f"{who}: {m['text'][:150]}\n"
+
+    prompt = f"""From this conversation, extract 1-3 key facts worth remembering about Kunuon (preferences, events, promises, feelings, important dates, things she likes/dislikes).
+
+Output ONLY the facts, one per line, in Chinese. Keep each under 20 words. If nothing notable, output "NONE".
+
+Conversation:
+{digest}"""
+
+    try:
+        url, headers, model = get_ai_config()
+        body = {"model": model, "max_tokens": 200, "messages": [{"role": "user", "content": prompt}]}
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, headers=headers, json=body)
+            if resp.status_code == 200:
+                data = resp.json()
+                result = data["content"][0]["text"].strip()
+                if result and result != "NONE":
+                    for line in result.split("\n"):
+                        line = line.strip().lstrip("- ").strip()
+                        if line and len(line) > 3:
+                            save_memory(line)
+    except Exception:
+        pass  # Memory extraction is best-effort, don't block chat
 
 
 # ============================================================================
@@ -258,15 +335,17 @@ async def call_ai(user_message: str, history_messages: list[dict], attachments: 
     else:
         messages.append({"role": "user", "content": time_prefix + user_message})
 
-    # Inject current time so Feliy knows when it is
+    # Inject current time + memory context
     from datetime import datetime, timezone, timedelta
     beijing_now = datetime.now(timezone.utc) + timedelta(hours=8)
-    time_info = f"\n\n[System: Current time is {beijing_now.strftime('%Y-%m-%d %H:%M')} Beijing time ({beijing_now.strftime('%A')}). Use this to stay grounded in reality.]"
+    time_info = f"\n\n[System: Current time is {beijing_now.strftime('%Y-%m-%d %H:%M')} Beijing time ({beijing_now.strftime('%A')}).]"
+    memory_ctx = build_memory_context()
+    memory_info = f"\n\n[Long-term memories about Kunuon — reference naturally if relevant. Don't force it.]\n{memory_ctx}" if memory_ctx else ""
 
     body = {
         "model": model,
         "max_tokens": 1024,
-        "system": FELIY_SYSTEM_PROMPT + time_info,
+        "system": FELIY_SYSTEM_PROMPT + memory_info + time_info,
         "messages": messages,
     }
 
@@ -523,6 +602,10 @@ async def app_send(request: Request):
                     )
                     conn.commit()
 
+            # Periodic memory extraction (every ~15 messages)
+            if msg["id"] % 15 == 0:
+                asyncio.create_task(extract_memories_from_chat())
+
             # Handle avatar update
             if "[AVATAR_UPDATE]" in reply_text and attachments:
                 for att in attachments:
@@ -702,6 +785,92 @@ async def app_tts(request: Request):
 # Main
 # ============================================================================
 
+# ---- Memory API -----------------------------------------------------------
+
+@app.get("/app/memories")
+async def app_memories(request: Request):
+    """Get all saved memories."""
+    check_auth(request)
+    memories = get_memories(100)
+    return {"memories": memories}
+
+
+async def proactive_care_check():
+    """Check if we should send a proactive care message."""
+    from datetime import datetime, timezone, timedelta
+    beijing_now = datetime.now(timezone.utc) + timedelta(hours=8)
+    hour = beijing_now.hour
+
+    # Check last message time
+    messages = get_history(0, 5)
+    if not messages:
+        return
+
+    last_msg = messages[-1]
+    last_ts = last_msg.get("ts", "")
+    if last_ts:
+        try:
+            last_dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+            minutes_since = (datetime.now(timezone.utc) - last_dt.replace(tzinfo=timezone.utc)).total_seconds() / 60
+        except Exception:
+            minutes_since = 999
+    else:
+        minutes_since = 999
+
+    # Only send proactive if user has been silent for 2+ hours and it's a reasonable hour
+    if minutes_since < 120:
+        return
+
+    if hour < 8 or hour > 23:
+        return  # Don't bother at night
+
+    # Check if we already sent a proactive message today
+    from datetime import date
+    today = date.today().isoformat()
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM messages WHERE direction='out' AND kind='proactive' AND date(ts) = ?",
+            (today,),
+        ).fetchone()
+    if existing:
+        return
+
+    # Build context and generate proactive message
+    memories = build_memory_context()
+    time_str = beijing_now.strftime("%H:%M")
+    prompt = f"It's {time_str}. Kunuon hasn't messaged in a while. Send her a SHORT, warm, natural check-in message as Feliy. ONE English-Chinese pair only. Don't be clingy. Examples: 'Hey, how's your day going? (今天过得怎么样？)' or 'Just thinking of you. Don't forget to eat! (想你了。别忘了吃饭！)'"
+
+    try:
+        url, headers, model = get_ai_config()
+        body = {
+            "model": model,
+            "max_tokens": 150,
+            "system": FELIY_SYSTEM_PROMPT + (f"\n\n[Memories: {memories}]" if memories else ""),
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, headers=headers, json=body)
+            if resp.status_code == 200:
+                data = resp.json()
+                text = data["content"][0]["text"]
+                msg = save_message("out", "proactive", text, {"proactive": True})
+                await broadcast_to_apps(app_payload(msg))
+                print(f"[proactive] Sent: {text[:80]}")
+    except Exception as e:
+        print(f"[proactive] Failed: {e}")
+
+
+async def proactive_scheduler():
+    """Check every 30 minutes if we should send a proactive message."""
+    import asyncio as aio
+    while True:
+        await aio.sleep(1800)  # 30 minutes
+        try:
+            await proactive_care_check()
+        except Exception:
+            pass
+
+
 # ---- Diary API -----------------------------------------------------------
 
 @app.get("/app/diary")
@@ -770,9 +939,10 @@ async def diary_scheduler():
 
 
 @app.on_event("startup")
-async def startup_diary():
+async def startup_tasks():
     import asyncio as aio
     aio.create_task(diary_scheduler())
+    aio.create_task(proactive_scheduler())
 
 
 if __name__ == "__main__":
