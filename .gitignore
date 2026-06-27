@@ -1,0 +1,24 @@
+.env
+relay.db
+uploads/
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+tidal_echo_temp/
+frontend/
+photo/
+*.bat
+启动文字.txt
+cluade启动.txt
+api key .txt
+feliy.txt
+feliy voice api.txt
+人设.txt
+read_docx.py
+feliy-chat.html
+feliy.html
+feliy_server.py
+feliy-chat.html
+前端/
+机教版*.docx

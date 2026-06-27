@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: feliy
+    env: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: RELAY_SECRET
+        sync: false
+      - key: AI_ENDPOINT
+        value: deepseek
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_MODEL
+        value: deepseek-chat
+      - key: DASHSCOPE_API_KEY
+        sync: false
+      - key: VISION_MODEL
+        value: qwen-vl-max
+      - key: RELAY_AI_NAME
+        value: Feliy
+      - key: RELAY_HUMAN_NAME
+        value: Kunuon
+      - key: RELAY_ALLOW_ORIGINS
+        value: "*"
