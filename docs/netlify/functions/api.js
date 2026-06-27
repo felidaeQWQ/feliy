@@ -20,7 +20,7 @@ function cors(resp) {
   return resp;
 }
 
-exports.handler = async (req) => {
+export default async function handler(req) {
   if (req.method === "OPTIONS") return cors(new Response(null, { status: 204 }));
   if (!checkAuth(req)) return cors(new Response("unauthorized", { status: 401 }));
 
