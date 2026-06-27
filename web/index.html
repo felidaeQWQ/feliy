@@ -3537,6 +3537,26 @@ async function apiHealth(){
   }catch(e){ return false; }
 }
 
+let pollTimer = null;
+function startPollingFallback(){
+  if (pollTimer) return;  // already polling
+  pollTimer = setInterval(async () => {
+    if (connected) return;  // SSE is working, stop polling
+    if (!secret || document.hidden) return;
+    try {
+      const since = lastId > 0 ? lastId : 0;
+      const r = await fetch(`${API_BASE}/app/history?since=${since}&limit=50`, { headers: authHeaders() });
+      if (!r.ok) return;
+      const data = await r.json();
+      const msgs = (data.messages || []);
+      if (msgs.length > 0) {
+        mergeHistory(msgs, { stickToBottom: nearBottom() });
+        connected = true; setConn("online");
+      }
+    } catch(e) {}
+  }, 2000);  // poll every 2 seconds
+}
+
 function markStreamEvent(){ lastStreamEventAt = Date.now(); }
 function openStream(){
   if (es){ try{ es.close(); }catch(e){} es = null; }
@@ -3554,7 +3574,11 @@ function openStream(){
   if (es.addEventListener){
     es.addEventListener("ping", () => { markStreamEvent(); connected = true; setConn("online"); });
   }
-  es.onerror = () => { connected = false; setConn("reconnecting"); };  // EventSource 自动重试
+  es.onerror = () => {
+    connected = false; setConn("reconnecting");
+    // Activate fast polling as fallback (for free hosts without SSE support)
+    startPollingFallback();
+  };
 }
 
 /* ════════════ presence ping ════════════ */
