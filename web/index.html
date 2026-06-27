@@ -3779,23 +3779,20 @@ function fmtDay(ts){
 function escapeHtml(s){
   return String(s || "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 }
-// Global: extracted SVG blocks for current message rendering
-let _svgBlocks = [];
-
 function renderText(t){
   t = t.replace(/\[AVATAR_UPDATE\]\s*/g, "");
   t = t.replace(/```svg\s*\n?/g, '').replace(/```\s*\n?/g, '');
-  // Extract SVG blocks, replace with text tokens (survive escaping)
-  _svgBlocks = [];
+  // Extract SVG, replace with placeholder tokens, convert to <img> AFTER escaping
+  const svgs = [];
   t = t.replace(/<svg\b[\s\S]*?<\/svg>/gi, (svg) => {
-    const idx = _svgBlocks.length;
-    _svgBlocks.push(svg);
-    return '\x00SVG' + idx + '\x00';
+    svgs.push(svg);
+    return '%%SVG' + (svgs.length - 1) + '%%';
   });
   let s = escapeHtml(t);
-  // Replace text tokens with actual placeholder divs
-  s = s.replace(/\x00SVG(\d+)\x00/g, (_, idx) => {
-    return '<div class="svg-placeholder" data-svg-idx="' + idx + '" style="background:rgba(255,255,255,.6);border-radius:10px;padding:8px;margin:8px 0;display:inline-block;min-width:100px;min-height:100px;"></div>';
+  // Replace tokens with data URI images (raw HTML inserted after escaping)
+  svgs.forEach((svg, i) => {
+    const dataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    s = s.replace('%%SVG' + i + '%%', '<img src="' + dataUri + '" style="max-width:100%;height:auto;display:block;margin:8px 0;border-radius:8px;background:rgba(255,255,255,.7);" alt="diagram">');
   });
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
@@ -4278,23 +4275,6 @@ function makeMessage(rowData){
   if (m.text) _inner += `<span class="txt">${renderText(m.text)}</span>`;
   _inner += `<span class="meta"></span>`;
   bubble.innerHTML = _inner;
-  // Post-process SVG placeholders: create proper SVG DOM nodes
-  bubble.querySelectorAll('.svg-placeholder').forEach(div => {
-    const idx = parseInt(div.dataset.svgIdx);
-    const svgStr = _svgBlocks[idx];
-    if (svgStr) {
-      try {
-        const doc = new DOMParser().parseFromString(svgStr, 'image/svg+xml');
-        const svgEl = doc.documentElement;
-        if (svgEl && svgEl.tagName === 'svg' && !doc.querySelector('parsererror')) {
-          // Copy attributes from placeholder to SVG
-          svgEl.style.maxWidth = '100%';
-          svgEl.style.height = 'auto';
-          div.replaceWith(svgEl);
-        }
-      } catch(e) { console.warn('SVG render error:', e); }
-    }
-  });
   if (atts.length){ bubble.classList.add("has-att"); if (!m.text) bubble.classList.add("att-only"); }
   const metaEl = bubble.querySelector(".meta");
   if (m.status === "sending") metaEl.innerHTML = `<span>${fmtTime(m.ts)}</span>` + sendingTickHtml();
