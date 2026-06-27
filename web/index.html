@@ -443,6 +443,7 @@
   .row.human.tail .bubble{ border-bottom-right-radius: 2px; }
 
   .bubble .txt{ white-space: normal; }
+  .bubble svg{ max-width:100%; height:auto; display:block; margin:8px 0; border-radius:8px; background:rgba(255,255,255,.5); }
   .bubble.has-att{ display:flex; flex-direction:column; gap:6px; }
   .bubble.att-only{ background:transparent !important; padding:0 !important; box-shadow:none !important; }
   .att-img-link{ display:block; line-height:0; border-radius:14px; overflow:hidden; width:min(64vw,260px); aspect-ratio:var(--att-ratio, 1.04); max-height:340px; background:rgba(125,128,135,.10); }
@@ -3782,6 +3783,8 @@ function renderText(t){
   // Strip system markers from display
   t = t.replace(/\[AVATAR_UPDATE\]\s*/g, "");
   let s = escapeHtml(t);
+  // Render inline SVG — Feliy can draw chemical structures, diagrams, etc.
+  s = s.replace(/&lt;svg\b([\s\S]*?)&lt;\/svg&gt;/g, (_, inner) => `<svg${inner}</svg>`);
   s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
