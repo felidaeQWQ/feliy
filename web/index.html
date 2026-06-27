@@ -3782,9 +3782,17 @@ function escapeHtml(s){
 function renderText(t){
   // Strip system markers from display
   t = t.replace(/\[AVATAR_UPDATE\]\s*/g, "");
+  // Extract SVG blocks BEFORE escaping — render them as raw HTML
+  const svgBlocks = [];
+  t = t.replace(/<svg\b[\s\S]*?<\/svg>/g, (match) => {
+    svgBlocks.push(match);
+    return `\x00SVG${svgBlocks.length - 1}\x00`;
+  });
   let s = escapeHtml(t);
-  // Render inline SVG — Feliy can draw chemical structures, diagrams, etc.
-  s = s.replace(/&lt;svg\b([\s\S]*?)&lt;\/svg&gt;/g, (_, inner) => `<svg${inner}</svg>`);
+  // Restore SVG blocks as raw HTML (unescaped)
+  svgBlocks.forEach((svg, i) => {
+    s = s.replace(`\x00SVG${i}\x00`, svg);
+  });
   s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');

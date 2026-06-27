@@ -605,8 +605,15 @@ async def app_send(request: Request):
             reply_text = await call_ai(text, messages, attachments)
             await broadcast_to_apps({"type": "typing", "active": False})
 
-            # Split reply into individual messages (separated by blank lines)
-            parts = [p.strip() for p in reply_text.split("\n\n") if p.strip()]
+            # Split reply into individual messages — but protect SVG blocks from being split
+            # Replace double-newlines inside SVG blocks with single newlines
+            import re
+            protected_text = re.sub(
+                r'(<svg[\s\S]*?</svg>)',
+                lambda m: m.group(1).replace('\n\n', '\n'),
+                reply_text
+            )
+            parts = [p.strip() for p in protected_text.split("\n\n") if p.strip()]
             for i, part in enumerate(parts):
                 reply_msg = save_message("out", "reply", part, {"in_reply_to": msg["id"], "part": i + 1, "total": len(parts)})
                 await broadcast_to_apps(app_payload(reply_msg))
