@@ -3781,24 +3781,19 @@ function escapeHtml(s){
 }
 function renderText(t){
   t = t.replace(/\[AVATAR_UPDATE\]\s*/g, "");
-  // Strip markdown code block wrappers from SVG (just in case)
   t = t.replace(/```svg\s*\n/g, '').replace(/```\s*\n/g, '');
-  // Extract and preserve SVG blocks using DOMParser
-  const svgMap = new Map();
+  // Extract SVG and render in dedicated containers
+  const svgBlocks = [];
   t = t.replace(/<svg\b[\s\S]*?<\/svg>/gi, (svg) => {
-    try {
-      const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
-      if (doc.documentElement && doc.documentElement.tagName === 'svg' && !doc.querySelector('parsererror')) {
-        const id = 'SVG_' + svgMap.size;
-        svgMap.set(id, svg);
-        return id;
-      }
-    } catch(e) {}
-    return svg;
+    const id = 'SVG_' + svgBlocks.length;
+    svgBlocks.push(svg);
+    return id;
   });
   let s = escapeHtml(t);
-  svgMap.forEach((svg, id) => {
-    s = s.replace(id, svg);
+  svgBlocks.forEach((svgStr, i) => {
+    // Wrap SVG in a dedicated container for proper rendering
+    const container = '<div class="svg-diagram" style="background:rgba(255,255,255,.7);border-radius:10px;padding:8px;margin:8px 0;display:inline-block;max-width:100%;">' + svgStr + '</div>';
+    s = s.replace('SVG_' + i, container);
   });
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
@@ -4281,6 +4276,18 @@ function makeMessage(rowData){
   if (m.text) _inner += `<span class="txt">${renderText(m.text)}</span>`;
   _inner += `<span class="meta"></span>`;
   bubble.innerHTML = _inner;
+  // Post-process SVG diagrams: innerHTML doesn't render SVG properly, use DOM API
+  bubble.querySelectorAll('.svg-diagram').forEach(div => {
+    const svgStr = div.textContent || div.innerHTML;
+    try {
+      const doc = new DOMParser().parseFromString(svgStr, 'image/svg+xml');
+      const svgEl = doc.documentElement;
+      if (svgEl && svgEl.tagName === 'svg' && !doc.querySelector('parsererror')) {
+        div.innerHTML = '';
+        div.appendChild(document.importNode(svgEl, true));
+      }
+    } catch(e) {}
+  });
   if (atts.length){ bubble.classList.add("has-att"); if (!m.text) bubble.classList.add("att-only"); }
   const metaEl = bubble.querySelector(".meta");
   if (m.status === "sending") metaEl.innerHTML = `<span>${fmtTime(m.ts)}</span>` + sendingTickHtml();
