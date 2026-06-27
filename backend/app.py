@@ -313,9 +313,27 @@ async def call_ai(user_message: str, history_messages: list[dict], attachments: 
     # Build messages array — last 30 messages for context
     recent = history_messages[-30:] if len(history_messages) > 30 else history_messages
     messages = []
-    for m in recent:
+
+    # Group consecutive AI messages (split replies) together for better context
+    i = 0
+    while i < len(recent):
+        m = recent[i]
         role = "user" if m["direction"] == "in" else "assistant"
-        messages.append({"role": role, "content": m["text"]})
+        text = m["text"]
+
+        # If AI messages were split (part/total in meta), collect them all
+        if m["direction"] == "out" and m.get("meta", {}).get("total", 1) > 1:
+            parts = [text]
+            j = i + 1
+            while j < len(recent) and recent[j]["direction"] == "out" and recent[j].get("meta", {}).get("part", 0) > 1:
+                parts.append(recent[j]["text"])
+                j += 1
+            text = " ".join(parts)
+            i = j
+        else:
+            i += 1
+
+        messages.append({"role": role, "content": text})
 
     # Build current user message with image descriptions + time context
     from datetime import datetime, timezone, timedelta
@@ -505,6 +523,7 @@ def check_auth(request: Request) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    app.state.pending_task = None
     yield
 
 
@@ -573,6 +592,10 @@ async def app_send(request: Request):
     # 3. Show typing indicator
     await broadcast_to_apps({"type": "typing", "active": True})
 
+    # Cancel pending AI reply when user interrupts
+    if app.state.pending_task and not app.state.pending_task.done():
+        app.state.pending_task.cancel()
+
     # 4. Call AI in background
     async def generate_reply():
         try:
@@ -587,7 +610,7 @@ async def app_send(request: Request):
                 reply_msg = save_message("out", "reply", part, {"in_reply_to": msg["id"], "part": i + 1, "total": len(parts)})
                 await broadcast_to_apps(app_payload(reply_msg))
                 if i < len(parts) - 1:
-                    await asyncio.sleep(0.8)  # natural pause between messages
+                    await asyncio.sleep(0.8)
 
             # If user sent /diary, save the FULL reply as a diary entry (not just first paragraph)
             if text.strip().startswith("/diary"):
@@ -625,7 +648,7 @@ async def app_send(request: Request):
             await broadcast_to_apps({"type": "typing", "active": False})
             await broadcast_to_apps(app_payload(error_msg))
 
-    asyncio.create_task(generate_reply())
+    app.state.pending_task = asyncio.create_task(generate_reply())
 
     return {"id": msg["id"]}
 
@@ -699,7 +722,7 @@ async def app_voice(request: Request):
             await broadcast_to_apps({"type": "typing", "active": False})
             await broadcast_to_apps(app_payload(error_msg))
 
-    asyncio.create_task(generate_reply())
+    app.state.pending_task = asyncio.create_task(generate_reply())
     return {"id": msg["id"], "text": text}
 
 
