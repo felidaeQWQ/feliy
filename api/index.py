@@ -214,3 +214,20 @@ async def app_diary(request: Request):
 async def app_memories(request: Request):
     check_auth(request)
     return {"memories": []}
+
+# Static file serving — serve the PWA frontend
+WEB_DIR = Path(__file__).parent.parent / "web"
+@app.get("/{path:path}")
+async def serve_static(path: str, request: Request):
+    """Catch-all: serve static files from web/ directory."""
+    # API paths are already handled above
+    file_path = WEB_DIR / (path or "index.html")
+    if file_path.is_file():
+        return FileResponse(file_path)
+    # SPA fallback: serve index.html for unknown paths
+    index = WEB_DIR / "index.html"
+    if index.exists():
+        return FileResponse(index)
+    raise HTTPException(status_code=404)
+
+init_db()
